@@ -1,6 +1,6 @@
 Co rozwiązujemy za problem?
 
-- `Suprvised learning` czyli mamy dane wejściowe $D = {{x, y}}$ i na ich podstawie szukamy funkcji $f$ która zadziała też na  zbiór testowy $x_* \notin D$
+- `Suprvised learning` czyli mamy dane wejściowe $D = {{x, y}}$ i na ich podstawie szukamy funkcji $f$ która zadziała też na zbiór testowy $x_* \notin D$
 
 Idea procesów gaussowskich
 
@@ -39,9 +39,9 @@ w tej perspektywie data set treningowy oznaczmy jako $(x_i, f_i) = (x_i, f(x_i))
 
 ma to coś co sie nazywa marginalization property (consistency) -> czyli podzbiór nie przeczy całości
 
-jak wcześniej oznaczaliśmy mając zbiór testowy $x_*$, mamy też dla niego do obliczenie wartość $f_*$ funkcji dla danych testowych. Zabawa polega na tym żeby znaleźć rozkład prawdopodobieństwa w przestrzeni funkcji który jak najelepiej odda $f_*$, w tym celu postuluje się jakąś funkcje kowariancji, gdzie najcześciej wybiera się 
+jak wcześniej oznaczaliśmy mając zbiór testowy $x_*$, mamy też dla niego do obliczenie wartość $f_*$ funkcji dla danych testowych. Zabawa polega na tym żeby znaleźć rozkład prawdopodobieństwa w przestrzeni funkcji który jak najelepiej odda $f_*$, w tym celu postuluje się jakąś funkcje kowariancji, gdzie najcześciej wybiera się
 
-$cov(f(x_p, x_q)) = k(x_p, x_q) = exp(-\frac{1}{2}||x_p-x_q||^2)$ 
+$cov(f(x_p, x_q)) = k(x_p, x_q) = exp(-\frac{1}{2}||x_p-x_q||^2)$
 
 później bierze się zmienna losową $X_*$ i z niej losujemy jakieś punkty, liczymy na podstawie ich macierz kowariancji i generujemy Guassa następującego
 
@@ -52,12 +52,40 @@ stąd `istotne jest wiedzieć jak sie generuje wielowymiarowego Gaussa`
 `w przypadku dokładnych danych`
 można jeszcze podbić stawke i robić rozkład na podstawie zarówno $X$ jak i $X_*$ i wzięciu prawdopodobieństwa warunkowego
 
-autor odróżnia $x$ (pojedyczny sample) i $X$ (jakiś ciąg sampli) 
+autor odróżnia $x$ (pojedyczny sample) i $X$ (jakiś ciąg sampli)
 
-`gdy mamy zaszumione dane wyjściowe` 
+`gdy mamy zaszumione dane wyjściowe`
 to robimy w zasadzie to samo i dostajemy te same wnioski co w wersji `weighted space` z szumem na wyjściu...
 
 no i okazuje sie że obliczenie rozkładu do wyniku sprowadza się do odwrócenia symetrycznej macierz kowariancji może z dodanym szumem (Cholesky + basksub) ale dalej w tym nieparametrycznym modelu mamy parametry XD nazywane `HIPERPARAMETRAMI` `kewk serio... które determinują jaką funkcje wariancji weżmiemy i jaki szum założymy
 
 # ogarnianie hiperparametrów w regresji
-można jeszcze wprowadzać funkcje celu! robiliśmy do tej pory bez tego i daliśmy rade znaleźć rozkład
+
+można jeszcze wprowadzać funkcje celu! robiliśmy do tej pory bez tego i daliśmy rade znaleźć rozkład.
+
+funckcja kary = loss function (oni oznaczają $\mathcal{L}(y_{true}, y_{guess})$)
+
+jest jakieś zdanie `The likelihood and loss function need not have anything in common.` i nie daj sb wmówić że jest inaczej
+
+ok to, jak działa kara? no chcemy znaleźć wartość $y_{guess}$ odbiega od $y_{true}$, no ale nie znamy go XD, zatem bierzemy $y_{guess}$, który minimializuje oczekiwaną karę w naszym bayesowskim modelu, czyli Risk
+
+$\tilde{R}_\mathcal{L}(y_{guess}|x∗) = \int\mathcal{L}(y∗,y_{guess})p(y∗|x∗, D) dy∗$
+
+tak sie składa że tym optymalnym dla $\mathcal{L}$
+
+- $|x_1 - x_2|$ jest mediana
+- $(x_1 - x_2)^2$ jest średnia
+
+dla gaussowskiej sa one równe!
+
+jest potem przykład z kinemematyka odwrotną robota, gdzie GPR (jakiś reduced) linear regressin wypada najlepiej co do przewidywań. Problemem jest, kostowność $O(n^3)$
+
+potem jest opis tego że GP linear reggression jest czymś co nazywa się `linear smoothener`, gdzie predykcja jest kombinacją liniową treningowych danych, gdzie regresja liniowa jest kombinacją liniową tylko inputów
+
+jest jeszcze opcja przybliżania liczenia tego, np. jak `kernel function`
+
+# `klasyfikacja`
+
+ponownie chcemy znaleźć funkcje aproksymująca ta prawdziwą pod spodem, jednak teraz przestrzeń wyjśc jest dyksretnym zbiorem klas $\mathcal{Ci}$, z tego powodu rozkład Gaussowski, który używaliśmy w przypadku regresji się nie nadaje...
+
+bedziemy generalizować regresje logistyczną...
