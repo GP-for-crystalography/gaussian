@@ -1,3 +1,9 @@
+słowniczek
+
+`inference` = wnioskowanie
+
+`latent` = ukryty
+
 Co rozwiązujemy za problem?
 
 - `Suprvised learning` czyli mamy dane wejściowe $D = {{x, y}}$ i na ich podstawie szukamy funkcji $f$ która zadziała też na zbiór testowy $x_* \notin D$
@@ -86,6 +92,40 @@ jest jeszcze opcja przybliżania liczenia tego, np. jak `kernel function`
 
 # `klasyfikacja`
 
-ponownie chcemy znaleźć funkcje aproksymująca ta prawdziwą pod spodem, jednak teraz przestrzeń wyjśc jest dyksretnym zbiorem klas $\mathcal{Ci}$, z tego powodu rozkład Gaussowski, który używaliśmy w przypadku regresji się nie nadaje...
+ponownie chcemy znaleźć funkcje aproksymująca ta prawdziwą pod spodem, jednak teraz przestrzeń wyjść jest dyksretnym zbiorem klas $\mathcal{Ci}$, z tego powodu rozkład Gaussowski, który używaliśmy w przypadku regresji się nie nadaje...
 
 bedziemy generalizować regresje logistyczną...
+
+są niby dwa podejścia do obliczania szansy przypisania do klasy $p(y|\mathbf{x})$
+
+- generative (wzór Bayesa i liczysz posterior prob na podstawie prior)
+- disciminative (liczymy bezpośrednio rozkład prawdopodobieństwa przypisania do klasy)
+
+discimintive robi się najprosciej sprowadzając problem do regresji, w przypadku binarnej robi sie to funkcją logistyczną
+
+$λ(z) = \frac{1}{1 + exp(−z)}$
+
+można używać innych funkcji jak np. dystrubuanty rozkładu normalnego to sie nazywa probit
+
+my się zajmiemy discrimative
+
+podejmowanie decyzji, do tego wykorzytujemy funkcje kary, kosztu, loss fucniotn $\mathcal{L}(c, c')$
+
+prostą funkcją kary jest zero-jedynkowa, czyli 1 gdy źle 0 gdy dobrze zaklasyfikujemy, nie zawsze dobre (nie widzi false positeve kosztu) optymalny 01 klasyfikator nazywa sie `Bayes classifier`
+
+my robimy probabilistic approach gdzie wybieramy tak by minimalizować ryzoko prawdopodobieństw przy decyzji z Bayesa, można by też szukać rozkładu decyzji $c(x)$, który minimalizuje ryzyko całkowite całką liczone, ale to jest trudne
+
+no i sprowadza sie to do wyliczenia wektora wag  a potem odwrócenia tej nieliniowej zmiany baz, którą zrobiliśmy, mamy to szczęście, że wsyzstko jest wypukłe i można wyliczać newtonem...
+
+`przybliżenie laplaca` polega na pzybliżeniu funkcji logit lub innej za pomocą gaussa z aproksymacji drugiego rzędu
+
+- najpierw szukamy maksimum prawdziwego rozkładu $\hat{f}$ metodą newtona (bo funkcja jest wypukła)
+- potem wyliczamy odpwoeidnie pochodne i rpzybliżamy Gaussem
+
+alternatywa to `expectation propagation`
+- tu sie przybliża jakimiś gaussami poszczególne rozkłady punktów
+- jakiś iteracyjnyt algorytm 
+  
+porównanie metod:
+- laplace pomija nie kładze nacisku na punktu "explainable" czyli takie które łatwo wydedukować
+- 
