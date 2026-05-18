@@ -129,3 +129,43 @@ alternatywa to `expectation propagation`
 porównanie metod:
 - laplace pomija nie kładze nacisku na punktu "explainable" czyli takie które łatwo wydedukować
 - 
+
+
+# TODO jakieś notatki z działu 4 
+
+no okazuje sie, że mamy dużo różnych opcji wyboru kernele, który okazuje się, że jest kernelem calkowym 
+
+- są opcje gładkie jak exp(-x^2)
+- sa opcje różniczkowalne kilkurotniek 
+- dyskretne 
+- dla grafów
+  
+można badać ich spektra w zależności co chcemy co -> problem własny itd itd
+
+# 5. dobór modelu
+
+no skoro już wiemy, że jest w uj jak wybrać? jest kilka kryt
+- policzyć prawdodobieństwo modelu dla danych danych
+- oszacować `generalization error` (czyli błąd dla nieznanych danych testowych)
+- bound generalization error
+- błąd treningowy jest słabym predykotrem
+
+my sie skupimy na perspektywie bayesowkiej -> czyli bedziemy szacować prawdopodobieństwo modelu dla z danych
+bedzie też walidacja krzyżowa
+
+## Bayesowskie wnioskowanie
+
+oznaczamy $w$ (od weights) jako parametry, $\theta$ hiperparametry (które rządzą tym jakie sa rozkłady dla dozwolonych paramtrów), $\mathcal{H}_i$ czyli modele
+
+na każdym z tych 3 etapów doboru, obliczamy ze wzoru Bayesa prawdopodbieństwo dla dnaych prior i posterior, na podstawie rozkładów brzegowych, ktore sprowadza sie do liczenia całki da się określić jakie sa optymalne ok parametry itd
+
+
+# Cross validation
+
+czyli wykorzystujemy część danych do sprawdzenia `walidacji` (validation), dla odróżnienia z testowym zbiorem, taki pojedyczny podział ma wady
+
+dlatego dzieli się na k zbiorów, gdzie trenuje się k modeli gdzie waliduje sie na jednym podzbiorze każdy model (wada jest, że robimy k modeli), do tego używa się funkcji kosztu
+
+# bayes dla GP
+
+no w zasadzie już część dla weightów już zrobiliśmy w poprzecnich paragrafach, teraz    
