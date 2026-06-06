@@ -115,7 +115,7 @@ prostą funkcją kary jest zero-jedynkowa, czyli 1 gdy źle 0 gdy dobrze zaklasy
 
 my robimy probabilistic approach gdzie wybieramy tak by minimalizować ryzoko prawdopodobieństw przy decyzji z Bayesa, można by też szukać rozkładu decyzji $c(x)$, który minimalizuje ryzyko całkowite całką liczone, ale to jest trudne
 
-no i sprowadza sie to do wyliczenia wektora wag  a potem odwrócenia tej nieliniowej zmiany baz, którą zrobiliśmy, mamy to szczęście, że wsyzstko jest wypukłe i można wyliczać newtonem...
+no i sprowadza sie to do wyliczenia wektora wag a potem odwrócenia tej nieliniowej zmiany baz, którą zrobiliśmy, mamy to szczęście, że wsyzstko jest wypukłe i można wyliczać newtonem...
 
 `przybliżenie laplaca` polega na pzybliżeniu funkcji logit lub innej za pomocą gaussa z aproksymacji drugiego rzędu
 
@@ -123,28 +123,30 @@ no i sprowadza sie to do wyliczenia wektora wag  a potem odwrócenia tej nielini
 - potem wyliczamy odpwoeidnie pochodne i rpzybliżamy Gaussem
 
 alternatywa to `expectation propagation`
+
 - tu sie przybliża jakimiś gaussami poszczególne rozkłady punktów
-- jakiś iteracyjnyt algorytm 
-  
+- jakiś iteracyjnyt algorytm
+
 porównanie metod:
+
 - laplace pomija nie kładze nacisku na punktu "explainable" czyli takie które łatwo wydedukować
-- 
+-
 
+# TODO jakieś notatki z działu 4
 
-# TODO jakieś notatki z działu 4 
-
-no okazuje sie, że mamy dużo różnych opcji wyboru kernele, który okazuje się, że jest kernelem calkowym 
+no okazuje sie, że mamy dużo różnych opcji wyboru kernele, który okazuje się, że jest kernelem calkowym
 
 - są opcje gładkie jak exp(-x^2)
-- sa opcje różniczkowalne kilkurotniek 
-- dyskretne 
+- sa opcje różniczkowalne kilkurotniek
+- dyskretne
 - dla grafów
-  
+
 można badać ich spektra w zależności co chcemy co -> problem własny itd itd
 
 # 5. dobór modelu
 
 no skoro już wiemy, że jest w uj jak wybrać? jest kilka kryt
+
 - policzyć prawdodobieństwo modelu dla danych danych
 - oszacować `generalization error` (czyli błąd dla nieznanych danych testowych)
 - bound generalization error
@@ -159,7 +161,6 @@ oznaczamy $w$ (od weights) jako parametry, $\theta$ hiperparametry (które rząd
 
 na każdym z tych 3 etapów doboru, obliczamy ze wzoru Bayesa prawdopodbieństwo dla dnaych prior i posterior, na podstawie rozkładów brzegowych, ktore sprowadza sie do liczenia całki da się określić jakie sa optymalne ok parametry itd
 
-
 # Cross validation
 
 czyli wykorzystujemy część danych do sprawdzenia `walidacji` (validation), dla odróżnienia z testowym zbiorem, taki pojedyczny podział ma wady
@@ -168,4 +169,67 @@ dlatego dzieli się na k zbiorów, gdzie trenuje się k modeli gdzie waliduje si
 
 # bayes dla GP
 
-no w zasadzie już część dla weightów już zrobiliśmy w poprzecnich paragrafach, teraz    
+no w zasadzie już część dla weightów już zrobiliśmy w poprzecnich paragrafach, teraz
+
+# `RKHS` reproducing kernel hilbert spaces
+
+teraz bedzie analiza powiązań GP z innymi klasycznymi ML modelami
+
+> **Def. RKHS**
+>
+> Mamy przestrzen hilberta $\mathcal{H}$ funckji rzeczywsitych ze zbioru indeksów$f: \mathcal{X} \rightarrow \mathbb{R}$. Wtedy $\mathcal{H}$, jest nazywane RKHS z iloczynem skalarnym $(\cdot,\cdot)_{\mathcal{H}}$ (wraz z normą $||f||_{\mathcal{H}} = \sqrt{(f, f)_{\mathcal{H}}}$) jeśli istnieje funkcja $k : \mathcal{X} \times\mathcal{X} \rightarrow \mathbb{R}$ taka że
+>
+> - $\forall_x g(x') = k(x, x') \in \mathcal{H}$
+> - ma własnośc reprocukcji $(f(\cdot),k(\cdot, x)_{\mathcal{H}}) = f(x)$
+
+To jest o tyle ważne że mamy
+
+> **Tw. Moore-Aronszajn**
+>
+> Dla danego zbioru indesków $\mathcal{X}$, dla każdego dodatnio określonego $k(\cdot, \cdot) : \mathcal{X}\times \mathcal{X} \rightarrow \mathbb{R}$ istnieje unikalne RKHS $\mathcal{H}$ i na odwrót.
+
+Podajemy to bez dowodu ale vibe zachowamy i zrozumiemy. mamy
+
+> **Tw. Mercera**
+>
+> Niech $(\mathcal{X}, \mu)$ będzie przestrzenią o skończonej mierze. Niech $k \in L_{\infty}(\mathcal{X}^2, \mu^2)$ będzie dodatnio okreśolnym jądrem względem miary $\mu$. Czyli operator $T_k : L_2(\mathcal{X}, \mu) \rightarrow L_2(\mathcal{X}, \mu)$
+>
+> $$(T_k f)(x) = \int_\mathcal{X} k(x, x') f(x') \ d\mu(x')$$
+>
+> jest dodatnio określony
+>
+> $$|T_k(f)|_\mu = \int k(x, x') f(x) f(x') \ d\mu(x) \ d\mu(x') > 0 $$
+>
+> Bierzemy rozkład własny $T_k$ $(\phi_i , \lambda_i )$ dla $\lambda_i > 0$. Wtedy:
+>
+> 1. wartości własne są bezwględnie sumowalne $\{ \lambda_i\}_{i=1}^{i = \infty}$, czyli $\sum_i |\lambda_i| <\infty$
+> 2. rozkład holds µ2 almost everywhere, where the series converges absolutely and uniformly µ2 almost everywhere.
+>
+>    $$k(x, x') = \sum_i \lambda_i \ \phi_i(x) \phi_i ^{*}(x')$$
+
+Wiec rołóżmy względem miary $\mu$: $k(x, x') = \sum_i \lambda_i \phi(x) \phi(x')$. Możemy teraz rozwinąć w tej samej bazie dowolnee funkcje $f = \sum f_i \phi_i$ i definiujemy iloczony skalarny
+
+$$ (f, g)_\mathcal{H} = \sum \frac{f_i \ g_i}{\lambda_i}$$
+
+No i teraz można rozważyć nasze warunki na RKHS i zobaczymy że je spełnia. A jako że Tw. mówiło, że jest to jedyne takie, to je właśnie znaleźiliśmy.
+
+
+### `REGULARYZACJA` Regresja w RKHS
+
+Przechodzimy dalej do zagadnienia znalezienia funkcji $f(x)$ na podstawie danych. Ogólnie jest $\infty$ funkcji przechodzących przez nasze punkty pomiarowe.
+
+Musimy narzucić dodatkowy warunek!
+- w GP bylo to `prior` czyli np. warunki na różnickzowlaność etc
+- tutaj też nałożemy warunki na prostote funkcji przez regularyzacje
+
+
+Definiujemy funkcjonał
+
+$$ J[f] =  \frac{\lambda}{2} |f|^2_{\mathcal{H}} + Q(\mathbf{y}, \mathbf{f})$$
+
+- $\mathbf{y}$ -> wektor testowych wyników 
+- $\mathbf{f} = (f(x_1),\dots,f(x_n))^T$ -> wektor przewidywań
+- $Q$ to będzie funkcja kary np. negative log-likelihood
+- $\frac{\lambda}{2} |f|^2_{\mathcal{H}}$ -> regularizer, czyli kara za współczynniki bo przecież 
+
+$$|f|^2_{\mathcal{H}} =\sum_i \frac{f_i^2}{\lambda_i} $$
