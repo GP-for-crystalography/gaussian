@@ -116,7 +116,7 @@ prostą funkcją kary jest zero-jedynkowa, czyli 1 gdy źle 0 gdy dobrze zaklasy
 my robimy probabilistic approach gdzie wybieramy tak by minimalizować ryzoko prawdopodobieństw przy decyzji z Bayesa, można by też szukać rozkładu decyzji $c(x)$, który minimalizuje ryzyko całkowite całką liczone, ale to jest trudne
 
 no i sprowadza sie to do wyliczenia wektora wag  a potem odwrócenia tej nieliniowej zmiany baz, którą zrobiliśmy, mamy to szczęście, że wsyzstko jest wypukłe i można wyliczać newtonem...
-
+ę
 `przybliżenie laplaca` polega na pzybliżeniu funkcji logit lub innej za pomocą gaussa z aproksymacji drugiego rzędu
 
 - najpierw szukamy maksimum prawdziwego rozkładu $\hat{f}$ metodą newtona (bo funkcja jest wypukła)
