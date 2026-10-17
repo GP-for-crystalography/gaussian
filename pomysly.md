@@ -13,3 +13,5 @@ kilka propozycji:
 3. `akceleracja GP na FPGA`, czyli implementacja obliczania szybkiego przez zrównoleglone obliczenia?
 4. `optymalizacja parametrów w syntezie HLS na FPGA`?
 5. `Indentyfikacja jakiegoś procesu`
+
+
