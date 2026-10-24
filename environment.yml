@@ -1,0 +1,19 @@
+name: gp_env
+channels:
+  - defaults
+dependencies:
+  - optuna
+  - scikit-image
+  - tqdm
+  - pandas
+  - python=3.12
+  - pytorch
+  - h5py
+  - scipy
+  - numpy
+  - matplotlib
+  - ipykernel
+  - orix
+  - multiprocess
+  - botorch
+  - pytest
