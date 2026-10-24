@@ -388,7 +388,11 @@ class TestDiagnostics:
 
 
 # ------------------------------------------------- prawdziwy plik EMsoftu
-REAL_MASTER = os.environ.get("ECHORD_MASTER")
+ROOT_DIR = os.getcwd()
+DATA_DIR = os.path.abspath(
+    os.path.join(ROOT_DIR, "../2026_10_19_example_PZ")
+)
+REAL_MASTER = os.environ.get("ECHORD_MASTER", os.path.join(DATA_DIR, "masterKTN_014_01.h5"))
 
 
 @pytest.fixture(scope="module")

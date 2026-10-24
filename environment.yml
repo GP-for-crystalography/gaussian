@@ -1,13 +1,16 @@
 name: gp_env
 channels:
+  - conda-forge
   - defaults
 dependencies:
+  - python=3.12
   - optuna
   - scikit-image
   - tqdm
   - pandas
-  - python=3.12
   - pytorch
+  - gpytorch
+  - botorch
   - h5py
   - scipy
   - numpy
@@ -15,5 +18,5 @@ dependencies:
   - ipykernel
   - orix
   - multiprocess
-  - botorch
   - pytest
+  - pip
