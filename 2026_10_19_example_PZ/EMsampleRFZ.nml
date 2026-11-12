@@ -2,8 +2,8 @@
 ! template file for the EMsampleRFZ program
 !
 ! sampling mode; 'RFZ' standard Rodrigues FZ; 'MIS' misorientation ball sampling; 'CON' conical sampling;
-! 'FIB' for uniform fiber texture sampling
- samplemode = 'RFZ'
+! 'FIB' for uniform fiber texture sampling 
+ samplemode = 'MIS'
 ! maximum misorientation [degrees], for 'MIS' samplemode only
  maxmisor = 5.D0,
 ! Rodrigues vector (n,tan(omega/2)) for center of misorientation ball, for 'MIS' samplemode only
@@ -18,11 +18,11 @@
 ! [the rotation axis need not be normalized]
  axFZ = 0.D0 0.D0 1.D0 0.D0,
 ! point group number
- pgnum = 32,
+ pgnum = 9,
 ! crystal structure file name (used for FIB samplemode only)
  xtalname = 'undefined'
 ! number of sampling points along cube semi-edge
- nsteps = 30,
+ nsteps = 150,
 ! grid type: 0 contains origin, 1 is has origin at center of grid box
  gridtype = 0,
 ! euler angle output file name
@@ -34,7 +34,7 @@
 ! Rodrigues output file name
  rooutname = 'undefined',
 ! quaternion output file name
- quoutname = 'test_ang_quaterion.csv',
+ quoutname = 'mis_0_0_0.csv',
 ! orientation matrix output file name
  omoutname = 'undefined',
 ! axis angle pair output file name

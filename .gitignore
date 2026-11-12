@@ -1,2 +1,17 @@
 \angles
 \__pycache__/
+\*.pt
+\*.npz
+gp_learning/model.pt
+gp_learning/real_results.npz
+gp_learning/real_results_part3.npz
+gp_learning/real_results_part2.npz
+gp_learning/mapfit_th40.524_sg0.28_bg3.npz
+gp_learning/mapfit_band21-60_th40.524_sg0.28.npz
+gp_learning/inversion_tests_truth.npz
+gp_learning/gp_ktn_th40.npz
+gp_learning/bank_cone_th40.0_sp0.7_bg3.npz
+gp_learning/bank_cone_sp0.7_bg3.npz
+gp_learning/bank_cone_sp0.7_bg0.npz
+gp_learning/literatura/
+pychord/
