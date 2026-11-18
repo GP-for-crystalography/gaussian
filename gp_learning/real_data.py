@@ -179,6 +179,113 @@ def cluster_map(scores, clean, k=2, n_use=4, seed=0):
     return out.reshape(H, W)
 
 
+def cluster_auto(scores, clean, method="hdbscan", n_use=4, min_cluster_size=40, min_samples=None,
+                 eps=None, selection="eom", k_max=8, xy_weight=0.0, seed=0):
+    """Klasteryzacja ze sprawdzaną liczbą klastrów (zamiast k-średnich z zadanym k).
+
+    method:
+      "hdbscan" — gęstościowa, bez eps; liczba klastrów wynika z min_cluster_size
+                  (selection="eom" łączy, "leaf" daje drobniejsze klastry),
+      "dbscan"  — eps z kolana krzywej k-odległości (jeśli eps=None), min_samples domyślnie 2*n_use,
+      "gmm"     — mieszanina gaussowska; k = argmin BIC dla k = 1..k_max (klastry eliptyczne).
+    xy_weight > 0 dodaje współrzędne piksela (std = 1, razy xy_weight) do cech, więc klastry
+    muszą być też spójne przestrzennie.
+    Zwraca (labels (H, W), info). Etykiety 0.. posortowane malejąco wg liczności; -1 = poza maską
+    `clean` albo szum (info["n_noise"]).
+    """
+    from sklearn.cluster import DBSCAN, HDBSCAN
+    from sklearn.mixture import GaussianMixture
+    from sklearn.neighbors import NearestNeighbors
+    H, W, _ = scores.shape
+    idx = np.flatnonzero(clean.ravel())
+    X = scores.reshape(-1, scores.shape[-1])[idx, :n_use]
+    Xs = X / X.std()
+    if xy_weight > 0:
+        ii, jj = np.divmod(idx, W)
+        xy = np.column_stack([ii, jj]).astype(float)
+        xy = (xy - xy.mean(0)) / xy.std()
+        Xs = np.column_stack([Xs, xy_weight * xy])
+    info = dict(method=method)
+    if min_samples is None:
+        min_samples = max(2 * Xs.shape[1], 5)
+    if method == "hdbscan":
+        lab = HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
+                      cluster_selection_method=selection, copy=True).fit_predict(Xs)
+    elif method == "dbscan":
+        if eps is None:
+            d = np.sort(NearestNeighbors(n_neighbors=min_samples).fit(Xs).kneighbors(Xs)[0][:, -1])
+            t = np.linspace(0, 1, len(d))                     # kolano = największa odległość od cięciwy
+            dn = (d - d[0]) / max(d[-1] - d[0], 1e-12)
+            eps = d[np.argmax(t - dn)]
+        info["eps"] = float(eps)
+        lab = DBSCAN(eps=eps, min_samples=min_samples).fit_predict(Xs)
+    elif method == "gmm":
+        bic, models = [], []
+        for k in range(1, k_max + 1):
+            g = GaussianMixture(k, covariance_type="full", n_init=3, random_state=seed).fit(Xs)
+            bic.append(g.bic(Xs)); models.append(g)
+        kb = int(np.argmin(bic))
+        info["bic"] = np.array(bic)
+        lab = models[kb].predict(Xs)
+    else:
+        raise ValueError(method)
+    info["n_noise"] = int((lab < 0).sum())
+    ks = np.unique(lab[lab >= 0])
+    cnt = np.array([(lab == c).sum() for c in ks])
+    remap = {int(c): r for r, c in enumerate(ks[np.argsort(-cnt)])}
+    lab2 = np.array([remap.get(int(c), -1) for c in lab])
+    info["k"] = len(ks)
+    info["sizes"] = np.sort(cnt)[::-1]
+    out = np.full(H * W, -1)
+    out[idx] = lab2
+    return out.reshape(H, W), info
+
+
+def detrend_scores(scores, clean, sigma=10.0):
+    """Odejmuje gładkie tło przestrzenne od składowych (normalizowany splot gaussowski po pikselach
+    czystych; sigma w pikselach). Usuwa wolnozmienny gradient (np. wygięcie), zostawia strukturę
+    drobniejszą niż ~sigma (paski). sigma=None → bez zmian. Poza `clean` zwraca NaN."""
+    from scipy.ndimage import gaussian_filter
+    if sigma is None:
+        return scores.copy()
+    out = np.full(scores.shape, np.nan)
+    c = clean.astype(float)
+    den = np.maximum(gaussian_filter(c, sigma), 1e-3)
+    for k in range(scores.shape[-1]):
+        s = np.where(clean, scores[..., k], 0.0)
+        out[..., k] = np.where(clean, scores[..., k] - gaussian_filter(s, sigma) / den, np.nan)
+    return out
+
+
+def gmm_scan(scores, clean, n_use=4, k_list=range(1, 11), covariance_type="full", xy_weight=0.0,
+             n_init=3, seed=0):
+    """GMM dla każdego k w k_list na pierwszych n_use składowych (wspólna skala, opcjonalnie xy).
+    Zwraca dict: k_list, bic, aic, labels {k: (H, W)} (klasy malejąco wg liczności, -1 poza maską),
+    sizes {k: liczności}."""
+    from sklearn.mixture import GaussianMixture
+    H, W, _ = scores.shape
+    idx = np.flatnonzero(clean.ravel())
+    X = scores.reshape(-1, scores.shape[-1])[idx, :n_use]
+    Xs = X / X.std()
+    if xy_weight > 0:
+        ii, jj = np.divmod(idx, W)
+        xy = np.column_stack([ii, jj]).astype(float)
+        Xs = np.column_stack([Xs, xy_weight * (xy - xy.mean(0)) / xy.std()])
+    res = dict(k_list=list(k_list), bic=[], aic=[], labels={}, sizes={})
+    for k in res["k_list"]:
+        g = GaussianMixture(k, covariance_type=covariance_type, n_init=n_init, random_state=seed).fit(Xs)
+        res["bic"].append(g.bic(Xs)); res["aic"].append(g.aic(Xs))
+        lab = g.predict(Xs)
+        cnt = np.bincount(lab, minlength=k)
+        order = np.argsort(-cnt)
+        remap = np.empty(k, int); remap[order] = np.arange(k)
+        out = np.full(H * W, -1); out[idx] = remap[lab]
+        res["labels"][k] = out.reshape(H, W)
+        res["sizes"][k] = np.sort(cnt)[::-1]
+    res["bic"], res["aic"] = np.array(res["bic"]), np.array(res["aic"])
+    return res
+
+
 def class_profiles(Y, valid, labels):
     """Średni z-score profil każdej klasy (k, n) (po ważnych klatkach) i liczności."""
     Z = _zscore_masked(Y, valid)

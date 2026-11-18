@@ -77,6 +77,25 @@ def test_model_free_clusters_find_stripes(stack):
     assert agree > 0.95
 
 
+@pytest.mark.parametrize("method", ["hdbscan", "dbscan", "gmm"])
+def test_cluster_auto_finds_number_of_clusters(method):
+    rng = np.random.default_rng(0)
+    h = w = 40
+    scores = rng.normal(size=(h, w, 8)) * 0.15
+    lab_true = (np.add.outer(np.arange(h), np.arange(w)) // 20) % 3          # 3 pasy (3 klastry)
+    centers = np.array([[0, 0, 0, 0], [3, 0, 0, 0], [0, 3, 0, 0]], float)
+    scores[..., :4] += centers[lab_true]
+    clean = np.ones((h, w), bool)
+    clean[5, 5] = False
+    lab, info = rd.cluster_auto(scores, clean, method=method, min_cluster_size=30)
+    assert info["k"] == 3
+    assert lab[5, 5] == -1
+    # zgodność z prawdą (z dokładnością do permutacji etykiet)
+    m = (lab >= 0) & clean
+    conf = np.array([[np.sum((lab == a) & (lab_true == b) & m) for b in range(3)] for a in range(3)])
+    assert conf.max(1).sum() / m.sum() > 0.95
+
+
 def test_theta_calibration_and_map_fit(stack, tmp_path):
     Y, _, raw = rd.load_stack(stack["path"])
     v = rd.valid_mask(raw)
