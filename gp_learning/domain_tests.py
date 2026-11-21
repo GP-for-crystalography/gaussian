@@ -396,3 +396,453 @@ def c_over_a_from_rotation(omega_deg):
 def rotation_from_c_over_a(ca):
     """Kąt obrotu sieci [deg] między domenami 90° dla danego c/a."""
     return 2 * np.degrees(np.arctan(np.asarray(ca, float))) - 90.0
+
+
+# ==========================================================================
+# Struktura pasków bez modelu (sekcja 2d): dwumodalność, test mieszaniny, asymetria stron
+# ==========================================================================
+def fraction_unclipped(field, valid=None, q_hi=0.99):
+    """Jak stripe_fraction, ale BEZ obcięcia do [0, 1] (obcięcie tworzy sztuczne piki w 0 i 1,
+    więc do testu dwumodalności się nie nadaje). Mediana = 0, kwantyl q_hi = 1."""
+    f = np.asarray(field, float).copy()
+    v = np.isfinite(f) if valid is None else (np.asarray(valid, bool) & np.isfinite(f))
+    if skew(f[v]) < 0:
+        f = -f
+    f0, f1 = np.median(f[v]), np.quantile(f[v], q_hi)
+    return (f - f0) / (f1 - f0)
+
+
+def lattice_mask(H, W, step=3):
+    """Co `step`-ty piksel w obu kierunkach (zmniejsza korelację przestrzenną próbek w testach
+    zakładających niezależność, np. dip test)."""
+    m = np.zeros((H, W), bool)
+    m[::step, ::step] = True
+    return m
+
+
+def bimodality(x, bins=40, k_max=3, seed=0):
+    """Czy rozkład 1-D jest wielomodalny? Zwraca dip (statystyka Hartigana) i p (pakiet `diptest`,
+    NaN jeśli go brak), BIC dla mieszanin 1..k_max gaussów 1-D oraz głębokość doliny histogramu
+    (min między dwoma największymi pikami / niższy z pików; 1 = brak doliny).
+    Uwaga: p zakłada niezależne próbki; piksele sąsiednie są skorelowane (użyj lattice_mask)."""
+    from scipy.signal import find_peaks
+    from sklearn.mixture import GaussianMixture
+    x = np.asarray(x, float)
+    x = x[np.isfinite(x)]
+    out = dict(n=len(x), dip=np.nan, p=np.nan)
+    try:
+        from diptest import diptest
+        out["dip"], out["p"] = (float(v) for v in diptest(x))
+    except Exception:
+        pass
+    X = x.reshape(-1, 1)
+    out["bic"] = np.array([GaussianMixture(k, n_init=2, random_state=seed).fit(X).bic(X)
+                           for k in range(1, k_max + 1)])
+    h, e = np.histogram(x, bins=bins)
+    hs = np.convolve(h, [0.25, 0.5, 0.25], mode="same")
+    pk, _ = find_peaks(np.r_[0, hs, 0])
+    pk = pk - 1
+    out["valley_ratio"] = np.nan
+    if len(pk) >= 2:
+        top = np.sort(pk[np.argsort(-hs[pk])[:2]])
+        out["valley_ratio"] = float(hs[top[0]:top[1] + 1].min() / hs[top].min())
+    out["hist"] = (h, e)
+    return out
+
+
+def _neigh_corr(S):
+    """Korelacja wartości z sąsiadem (4-sąsiedztwo) po parach, gdzie obie są skończone."""
+    a = np.r_[S[:, :-1][np.isfinite(S[:, :-1]) & np.isfinite(S[:, 1:])],
+              S[:-1][np.isfinite(S[:-1]) & np.isfinite(S[1:])]]
+    b = np.r_[S[:, 1:][np.isfinite(S[:, :-1]) & np.isfinite(S[:, 1:])],
+              S[1:][np.isfinite(S[:-1]) & np.isfinite(S[1:])]]
+    return float(np.corrcoef(a, b)[0, 1]) if len(a) > 10 else np.nan
+
+
+def _coherence(R):
+    """|średnia reszta|² / średnia |reszta|² po pikselach (szum: ≈ 1/liczba pikseli)."""
+    m = R.mean(0)
+    return float(m @ m / max(np.mean((R * R).sum(1)), 1e-300))
+
+
+def mixture_test(Y, valid, frac, ok, core=0.6, bg=0.08, mid=(0.15, 0.85), n_pc=3, seed=0):
+    """Czy profile pikseli pośrednich to kombinacja dwóch stanów końcowych?
+
+    Profile końcowe: średnie z-score'owane profile czystej matrycy (frac <= bg) i rdzenia pasków
+    (frac >= core). Piksel o pośrednim ułamku jest dopasowywany jako a·P_matryca + b·P_pasek + c.
+    (Z-score jest liniowy w intensościach z dokładnością do skalara, więc mieszanina intensywności
+    jest kombinacją z-score'ów — nie trzeba dopasowywać surowych.)
+    Zwraca energię reszt (po pikselach) dla grup, PCA reszt pikseli pośrednich i czystych,
+    mapę wyniku PC1 reszt oraz udział systematyczny reszt coh = |średnia reszta|² / średnia |reszta|²
+    (≈ 1/n dla szumu; duży = wszystkie piksele pośrednie mają tę samą brakującą składową = trzeci stan).
+    """
+    H, W, n = Y.shape
+    ok = np.asarray(ok, bool) & valid.any(-1)
+    lab = np.full((H, W), -1)
+    lab[ok & (frac <= bg)] = 0
+    lab[ok & (frac >= core)] = 1
+    prof, cnt = rd.class_profiles(Y, valid, lab)
+    Z = rd._zscore_masked(Y, valid).reshape(-1, n)
+    V = valid.reshape(-1, n)
+
+    def fit(sel):
+        idx = np.flatnonzero(sel.ravel())
+        coef = np.full((len(idx), 3), np.nan)
+        R = np.zeros((len(idx), n))
+        e = np.full(len(idx), np.nan)
+        for q, p in enumerate(idx):
+            k = V[p]
+            if k.sum() < 20:
+                continue
+            A = np.column_stack([prof[0][k], prof[1][k], np.ones(k.sum())])
+            c, *_ = np.linalg.lstsq(A, Z[p, k], rcond=None)
+            r = Z[p, k] - A @ c
+            R[q, k], coef[q], e[q] = r, c, r @ r
+        return idx, coef, R, e
+
+    m_mid = ok & (frac > mid[0]) & (frac < mid[1])
+    i_mid, c_mid, R_mid, e_mid = fit(m_mid)
+    i_m, _, R_m, e_m = fit(lab == 0)
+    i_s, _, R_s, e_s = fit(lab == 1)
+    good = np.isfinite(e_mid)
+    i_mid, c_mid, R_mid, e_mid = i_mid[good], c_mid[good], R_mid[good], e_mid[good]
+
+    def pca(R, nmax):
+        Rc = R - R.mean(0)
+        U, S, Vt = np.linalg.svd(Rc, full_matrices=False)
+        return (S[:n_pc] ** 2) / len(R), U[:, :n_pc] * S[:n_pc], Vt[:n_pc]
+
+    rng = np.random.default_rng(seed)
+    pure_R = np.vstack([R_m, R_s])
+    sub = rng.choice(len(pure_R), size=min(len(R_mid), len(pure_R)), replace=False)
+    eig_mid, sc_mid, comp_mid = pca(R_mid, n_pc)
+    eig_pure, sc_pure, _ = pca(pure_R[sub], n_pc)
+    smap = np.full(H * W, np.nan); smap[i_mid] = sc_mid[:, 0]; smap = smap.reshape(H, W)
+    # tych samych pikseli pure -> mapa wyniku dla grupy czystej
+    pmap = np.full(H * W, np.nan)
+    pidx = np.r_[i_m, i_s][sub]
+    pmap[pidx] = sc_pure[:, 0]
+    pmap = pmap.reshape(H, W)
+    w_hat = c_mid[:, 1] / np.where(np.abs(c_mid[:, 0] + c_mid[:, 1]) > 1e-9, c_mid[:, 0] + c_mid[:, 1], np.nan)
+    fr_mid = frac.reshape(-1)[i_mid]
+    ok_w = np.isfinite(w_hat)
+    return dict(
+        n_mid=int(len(i_mid)), n_matrix=int(len(i_m)), n_core=int(len(i_s)),
+        e_mid=e_mid, e_matrix=e_m[np.isfinite(e_m)], e_core=e_s[np.isfinite(e_s)],
+        ratio_median=float(np.median(e_mid) / np.median(np.r_[e_m[np.isfinite(e_m)], e_s[np.isfinite(e_s)]])),
+        eig_mid=eig_mid, eig_pure=eig_pure, comp_mid=comp_mid,
+        score_mid=smap, score_pure=pmap,
+        coh_mid=_coherence(R_mid), coh_pure=_coherence(pure_R[sub]),
+        w_hat=w_hat, frac_mid=fr_mid,
+        w_corr=float(np.corrcoef(w_hat[ok_w], fr_mid[ok_w])[0, 1]) if ok_w.sum() > 10 else np.nan,
+        endmember_dist=float(1 - np.corrcoef(prof[0], prof[1])[0, 1]),
+    )
+
+
+def side_asymmetry(field, ok, alpha_deg, du=0.5, width=None, min_prominence=0.25, min_sep=3.0,
+                   s_min=1.0):
+    """Asymetria profilu pola w poprzek pasków względem środka każdego pasa.
+
+    u = −sin(a)(x−x0) + cos(a)(y−y0), x = kolumna, y = wiersz (jak w cross_stripe_profiles).
+    Pole uśredniane po całej długości pasków w przedziałach u (du), środki pasów = maksima
+    (dokładność ułamka przedziału, parabola), potem każdy pas ma profil P_p(s) w s = u − u_p
+    ∈ [−width, width]. Asymetria pasa: A_p = średnia po |s| ≥ s_min z (P(+s) − P(−s)) / wysokość.
+    Zwraca średnią A, jej błąd (po pasach), test t i test znaku, uśredniony profil i D(s) = P(+s) − P(−s).
+    Dodatnia asymetria: pole większe po stronie rosnącego u, czyli w kierunku (−sin a, cos a) w
+    (kolumna, wiersz). Nie mierzy samego nachylenia ściany — odróżnia tylko symetrię od asymetrii.
+    """
+    from scipy.ndimage import gaussian_filter1d
+    from scipy.signal import find_peaks
+    from scipy.stats import binomtest, t as tdist
+    H, W = field.shape
+    a = np.deg2rad(alpha_deg)
+    ii, jj = np.mgrid[0:H, 0:W]
+    x, y = jj - (W - 1) / 2, ii - (H - 1) / 2
+    u = -np.sin(a) * x + np.cos(a) * y
+    ok = np.asarray(ok, bool) & np.isfinite(field)
+    uu, ff = u[ok], field[ok]
+    edges = np.arange(np.floor(uu.min()), np.ceil(uu.max()) + 2 * du, du)
+    idx = np.digitize(uu, edges) - 1
+    nb = len(edges) - 1
+    cnt = np.bincount(idx, minlength=nb)[:nb]
+    sm = np.bincount(idx, ff, minlength=nb)[:nb]
+    F = np.where(cnt >= 3, sm / np.maximum(cnt, 1), np.nan)
+    cen = edges[:-1] + du / 2
+    good = np.isfinite(F)
+    Fi = np.interp(cen, cen[good], F[good])
+    Fs = gaussian_filter1d(Fi, 0.7 / du)
+    rngF = np.nanpercentile(Fs, 99) - np.nanpercentile(Fs, 1)
+    pk, _ = find_peaks(Fs, prominence=min_prominence * rngF, distance=max(int(min_sep / du), 1))
+    pk = pk[(pk > 0) & (pk < nb - 1)]
+    up = []
+    for i in pk:                                              # parabola przez 3 punkty
+        y0, y1, y2 = Fs[i - 1], Fs[i], Fs[i + 1]
+        den = y0 - 2 * y1 + y2
+        up.append(cen[i] + (0.5 * (y0 - y2) / den * du if abs(den) > 1e-12 else 0.0))
+    up = np.array(up)
+    base = float(np.nanmedian(F))
+    out = dict(u_centers=cen, F=F, Fs=Fs, u_peaks=up, n_peaks=0)
+    if len(up) < 3:
+        return out
+    period = float(np.median(np.diff(up)))
+    w = 0.45 * period if width is None else width
+    n = int(np.floor(w / du))
+    sedges = np.arange(-n, n + 1) * du
+    scen = 0.5 * (sedges[:-1] + sedges[1:])                   # 2n przedziałów, symetrycznie
+    P, H_, keep = [], [], []
+    for k, upk in enumerate(up):
+        if upk - w < uu.min() or upk + w > uu.max():
+            continue
+        s = u - upk
+        sel = ok & (np.abs(s) < n * du - 1e-9)
+        j = np.digitize(s[sel], sedges) - 1
+        c = np.bincount(j, minlength=2 * n)[:2 * n]
+        m = np.bincount(j, field[sel], minlength=2 * n)[:2 * n]
+        P.append(np.where(c >= 2, m / np.maximum(c, 1), np.nan))
+        H_.append(Fs[pk[k]] - base)
+        keep.append(k)
+    if len(P) < 3:
+        return out
+    P, H_ = np.array(P), np.array(H_)
+    right = P[:, n:]                                          # s > 0
+    left = P[:, :n][:, ::-1]                                  # s < 0 odbite
+    D = right - left
+    sc_ = scen[n:]
+    use = sc_ >= s_min
+    A = np.nanmean(D[:, use], axis=1) / H_
+    A = A[np.isfinite(A)]
+    npk = len(A)
+    Am, Ase = float(A.mean()), float(A.std(ddof=1) / np.sqrt(npk))
+    tval = Am / Ase if Ase > 0 else np.nan
+    out.update(n_peaks=npk, period=period, width=w, A=A, A_mean=Am, A_se=Ase, t=float(tval),
+               p_t=float(2 * tdist.sf(abs(tval), npk - 1)) if np.isfinite(tval) else np.nan,
+               n_pos=int((A > 0).sum()),
+               p_sign=float(binomtest(int((A > 0).sum()), npk, 0.5).pvalue),
+               s_all=scen, mean_profile=np.nanmean(P / H_[:, None], axis=0),
+               se_profile=np.nanstd(P / H_[:, None], axis=0, ddof=1) / np.sqrt(npk),
+               s_pos=sc_, D_mean=np.nanmean(D / H_[:, None], axis=0),
+               D_se=np.nanstd(D / H_[:, None], axis=0, ddof=1) / np.sqrt(npk))
+    return out
+
+
+# ==========================================================================
+# Sekcja 2e: przesunięcia klatek między ω i test naprzemienności domen (ABAB)
+# ==========================================================================
+def u_grid(H, W, alpha_deg):
+    """Współrzędna w poprzek pasków (jak w side_asymmetry): u = −sin(a)(x−x0) + cos(a)(y−y0)."""
+    a = np.deg2rad(alpha_deg)
+    ii, jj = np.mgrid[0:H, 0:W]
+    return -np.sin(a) * (jj - (W - 1) / 2) + np.cos(a) * (ii - (H - 1) / 2)
+
+
+def frame_shifts(Y, valid, S, alpha_deg, ok, poly=2, min_pix=200, norm="mean"):
+    """Przesunięcie wzoru pasków w poprzek pasków (wzdłuż u) w każdej klatce ω.
+
+    Dla klatki k (z-score po ω, więc zero-średnie): Z_k ≈ wielomian(x, y) + c_k·S + d_k·∂_u S,
+    S = gładka mapa pasków (znormalizowana). Z_k(x) = c·S(x − δ) ≈ c·S − c·δ·∂_u S → δ_k = −d_k/c_k [px].
+    Wielomian (stopień `poly`) pochłania wolne tło jasności. Mierzalna jest tylko składowa prostopadła
+    do pasków (wzdłuż pasków nie ma gradientu). Dodatnie δ: wzór przesunięty ku rosnącemu u.
+    Dokładność amplitudy ≈ ±15% (przy δ ~ szerokość paska/2 amplituda jest lekko zawyżona, drugi rząd);
+    zbyt mocno wygładzone S obciąża amplitudę, kształt zależności od ω pozostaje.
+    Zwraca dict: c, d, se_c, se_d, delta, se_delta, weight (=1/se²), delta_rel (minus średnia ważona), n_pix.
+    """
+    H, W, n = Y.shape
+    a = np.deg2rad(alpha_deg)
+    okm = np.asarray(ok, bool) & np.isfinite(S)
+    from scipy.ndimage import map_coordinates
+    S0 = (S - np.nanmean(S[okm])) / np.nanstd(S[okm])
+    S0 = np.where(np.isfinite(S0), S0, 0.0)
+    ii, jj = np.mgrid[0:H, 0:W]
+    hh = 0.5                                                  # pochodna po u: różnica centralna na splajnie
+    gp = map_coordinates(S0, [ii + hh * np.cos(a), jj - hh * np.sin(a)], order=3, mode="nearest")
+    gm = map_coordinates(S0, [ii - hh * np.cos(a), jj + hh * np.sin(a)], order=3, mode="nearest")
+    G = (gp - gm) / (2 * hh)
+    x, y = (jj - (W - 1) / 2) / (W / 2), (ii - (H - 1) / 2) / (H / 2)
+    cols = [np.ones_like(x)]
+    if poly >= 1:
+        cols += [x, y]
+    if poly >= 2:
+        cols += [x * x, x * y, y * y]
+    B = np.stack(cols, -1)
+    nb = B.shape[-1]
+    if norm == "zscore":
+        Z = rd._zscore_masked(Y, valid)
+    else:
+        w_ = valid.astype(float)
+        mu_ = (Y * w_).sum(-1, keepdims=True) / np.maximum(w_.sum(-1, keepdims=True), 1)
+        Z = np.where(valid, (Y - mu_) / np.maximum(np.abs(mu_), 1e-12), 0.0)
+    out = {k: np.full(n, np.nan) for k in ("c", "d", "se_c", "se_d", "delta", "se_delta", "n_pix")}
+    for k in range(n):
+        sel = okm & valid[..., k]
+        npx = int(sel.sum())
+        out["n_pix"][k] = npx
+        if npx < min_pix:
+            continue
+        A = np.column_stack([B[sel], S0[sel], G[sel]])
+        z = Z[..., k][sel]
+        coef, *_ = np.linalg.lstsq(A, z, rcond=None)
+        r = z - A @ coef
+        cov = (r @ r / max(npx - A.shape[1], 1)) * np.linalg.inv(A.T @ A)
+        c, d = coef[nb], coef[nb + 1]
+        vcc, vdd, vcd = cov[nb, nb], cov[nb + 1, nb + 1], cov[nb, nb + 1]
+        out["c"][k], out["d"][k] = c, d
+        out["se_c"][k], out["se_d"][k] = np.sqrt(vcc), np.sqrt(vdd)
+        if abs(c) > 1e-12:
+            out["delta"][k] = -d / c
+            v = vdd / c ** 2 + d ** 2 * vcc / c ** 4 - 2 * d * vcd / c ** 3
+            out["se_delta"][k] = np.sqrt(max(v, 0.0))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        w = 1.0 / out["se_delta"] ** 2
+    w = np.where(np.isfinite(w), w, 0.0)
+    out["weight"] = w
+    good = np.isfinite(out["delta"]) & (w > 0)
+    out["delta_rel"] = out["delta"] - (np.average(out["delta"][good], weights=w[good]) if good.any() else 0.0)
+    return out
+
+
+def fit_shift_model(omega_deg, delta, weight=None, harmonics=2, trend=True):
+    """Dopasowanie δ(ω) ≈ d0 + Σ_h (A_h cos hω + B_h sin hω) + m·(ω − ω̄)/360° (ważone).
+    Okresowość 360° (h = 1) wskazuje mimośrodowy obrót próbki; trend — dryf. Zwraca współczynniki,
+    amplitudy i fazy harmonicznych, trend [px/360°], R² ważone, rms reszt, krzywą fit."""
+    om = np.asarray(omega_deg, float)
+    w = np.deg2rad(om)
+    wt = np.ones_like(om) if weight is None else np.asarray(weight, float)
+    good = np.isfinite(delta) & np.isfinite(wt) & (wt > 0)
+    cols = [np.ones_like(w)]
+    for h in range(1, harmonics + 1):
+        cols += [np.cos(h * w), np.sin(h * w)]
+    if trend:
+        cols.append((om - om[good].mean()) / 360.0)
+    A = np.column_stack(cols)
+    sw = np.sqrt(wt[good])
+    coef, *_ = np.linalg.lstsq(A[good] * sw[:, None], np.asarray(delta)[good] * sw, rcond=None)
+    fit = A @ coef
+    res = np.asarray(delta)[good] - fit[good]
+    dbar = np.average(np.asarray(delta)[good], weights=wt[good])
+    ss_tot = np.sum(wt[good] * (np.asarray(delta)[good] - dbar) ** 2)
+    ss_res = np.sum(wt[good] * res ** 2)
+    amp = [float(np.hypot(coef[1 + 2 * h], coef[2 + 2 * h])) for h in range(harmonics)]
+    ph = [float(np.degrees(np.arctan2(coef[2 + 2 * h], coef[1 + 2 * h]))) for h in range(harmonics)]
+    return dict(coef=coef, fit=fit, amplitude=amp, phase_deg=ph, trend=float(coef[-1]) if trend else 0.0,
+                r2=float(1 - ss_res / ss_tot) if ss_tot > 0 else np.nan,
+                rms=float(np.sqrt(np.average(res ** 2, weights=wt[good]))), n_good=int(good.sum()))
+
+
+def shift_frames(Y, valid, delta_u, alpha_deg):
+    """Koryguje przesunięcie: Y'_k(x) = Y_k(x + δ_k·û), û = (−sin a, cos a) w (kolumna, wiersz).
+    Interpolacja liniowa z uwzględnieniem pikseli nieważnych (waga = maska). Zwraca (Y', valid')."""
+    from scipy.ndimage import map_coordinates
+    H, W, n = Y.shape
+    a = np.deg2rad(alpha_deg)
+    ii, jj = np.mgrid[0:H, 0:W].astype(float)
+    Yc = np.zeros_like(Y, dtype=float)
+    vc = np.zeros(Y.shape, bool)
+    for k in range(n):
+        dk = delta_u[k]
+        if not np.isfinite(dk):
+            dk = 0.0
+        rows, cols = ii + dk * np.cos(a), jj - dk * np.sin(a)
+        v = valid[..., k].astype(float)
+        num = map_coordinates(np.where(valid[..., k], Y[..., k], 0.0), [rows, cols], order=1, mode="nearest")
+        den = map_coordinates(v, [rows, cols], order=1, mode="nearest")
+        vc[..., k] = den > 0.99
+        Yc[..., k] = np.where(vc[..., k], num / np.maximum(den, 1e-9), 0.0)
+    return Yc, vc
+
+
+def flank_signs(score, alpha_deg, u_peaks, period, wfrac=0.45, s_min=0.3):
+    """Znak różnicy wyniku (np. PC1 reszt) między prawą a lewą flanką każdego pasa.
+    Stały znak dla kolejnych pasów → przesunięcie / asymetryczna ściana; naprzemienny → domeny ABAB.
+    Zwraca (DataFrame po pasach, statystyki: n_pairs, n_same, p_same, mean_prod)."""
+    import pandas as pd
+    from scipy.stats import binomtest
+    u = u_grid(*score.shape, alpha_deg)
+    w = wfrac * period
+    rows = []
+    for k, up in enumerate(u_peaks):
+        s = u - up
+        L = score[(s < -s_min) & (s > -w)]
+        R = score[(s > s_min) & (s < w)]
+        L, R = L[np.isfinite(L)], R[np.isfinite(R)]
+        if len(L) < 5 or len(R) < 5:
+            continue
+        rows.append((k, float(up), float(L.mean()), float(R.mean()), len(L), len(R)))
+    df = pd.DataFrame(rows, columns=["pas", "u", "L", "R", "nL", "nR"])
+    df["roznica"] = df["R"] - df["L"]
+    df["znak"] = np.sign(df["roznica"]).astype(int)
+    pairs = [(df.znak.iloc[i], df.znak.iloc[i + 1]) for i in range(len(df) - 1)
+             if df.pas.iloc[i + 1] - df.pas.iloc[i] == 1]
+    n_same = int(sum(a == b for a, b in pairs))
+    st = dict(n_pairs=len(pairs), n_same=n_same,
+              p_same=float(binomtest(n_same, len(pairs), 0.5).pvalue) if pairs else np.nan,
+              mean_prod=float(np.mean([a * b for a, b in pairs])) if pairs else np.nan)
+    return df, st
+
+
+def plateau_profiles(Y, valid, frac, ok, alpha_deg, u_peaks, margin=None, period=None, frac_max=0.15,
+                     min_pix=30, seed=0, region=None):
+    """Średnie z-score'owane profile 'plateau' (matryca, frac ≤ frac_max) między kolejnymi pasami oraz
+    macierz D_ij = 1 − r (profile scentrowane). `region` (maska bool) ogranicza piksele (np. tylko jedna klasa). noise_ij = (h_i + h_j)/4, h = 1 − r między losowymi
+    połówkami pikseli przedziału: oszacowanie wkładu szumu do D."""
+    H, W, n = Y.shape
+    u = u_grid(H, W, alpha_deg)
+    m = margin if margin is not None else max(1.0, 0.2 * (period if period else 8.0))
+    Z = rd._zscore_masked(Y, valid)
+    rng = np.random.default_rng(seed)
+
+    def cr(a, b):
+        a, b = a - a.mean(), b - b.mean()
+        return float(a @ b / np.sqrt((a @ a) * (b @ b) + 1e-300))
+
+    idx, prof, cnt, h = [], [], [], []
+    for i in range(len(u_peaks) - 1):
+        sel = np.asarray(ok, bool) & (frac <= frac_max) & (u > u_peaks[i] + m) & (u < u_peaks[i + 1] - m)
+        if region is not None:                                   # np. tylko strefa jednej klasy / okno wzdłuż pasków
+            sel &= np.asarray(region, bool)
+        npx = int(sel.sum())
+        if npx < min_pix:
+            continue
+        Zs, Vs = Z[sel], valid[sel]
+        prof.append(Zs.sum(0) / np.maximum(Vs.sum(0), 1))
+        perm = rng.permutation(npx)
+        a_, b_ = perm[: npx // 2], perm[npx // 2:]
+        pa = Zs[a_].sum(0) / np.maximum(Vs[a_].sum(0), 1)
+        pb = Zs[b_].sum(0) / np.maximum(Vs[b_].sum(0), 1)
+        h.append(1 - cr(pa, pb))
+        idx.append(i)
+        cnt.append(npx)
+    prof = np.array(prof)
+    mm = len(prof)
+    D = np.array([[1 - cr(prof[a], prof[b]) for b in range(mm)] for a in range(mm)]) if mm else np.zeros((0, 0))
+    h = np.array(h)
+    noise = (h[:, None] + h[None, :]) / 4 if mm else np.zeros((0, 0))
+    return dict(idx=np.array(idx), prof=prof, cnt=np.array(cnt), D=D, noise=noise, h=h)
+
+
+def abab_regression(pp, power=2):
+    """D_ij − noise_ij = a + β·dist^power + γ·[dist nieparzysty], dist = różnica numerów pasów.
+    Gładkie wygięcie → β > 0, γ ≈ 0 (D rośnie z odległością). Naprzemienne domeny ABAB → γ > 0:
+    pary o nieparzystej odległości różnią się bardziej, niż daje trend. Błędy: jackknife po przedziałach.
+    D1, D2 = średnie D (minus szum) dla odległości 1 i 2: ABAB → D1 > D2, trend gładki → D1 < D2."""
+    idx, D, noise = pp["idx"], pp["D"], pp["noise"]
+    m = len(idx)
+    nan = dict(a=np.nan, beta=np.nan, gamma=np.nan, se_beta=np.nan, se_gamma=np.nan, t_gamma=np.nan,
+               D1=np.nan, D2=np.nan, n_pairs=0, n_int=m)
+    if m < 4:
+        return nan
+    P = [(a, b, int(idx[b] - idx[a]), D[a, b] - noise[a, b]) for a in range(m) for b in range(a + 1, m)]
+    arr = np.array(P, float)
+
+    def fit(sel):
+        X = np.column_stack([np.ones(sel.sum()), arr[sel, 2] ** power, (arr[sel, 2] % 2)])
+        return np.linalg.lstsq(X, arr[sel, 3], rcond=None)[0]
+
+    c0 = fit(np.ones(len(arr), bool))
+    jk = np.array([fit((arr[:, 0] != j) & (arr[:, 1] != j)) for j in range(m)])
+    se = np.sqrt((m - 1) / m * ((jk - jk.mean(0)) ** 2).sum(0))
+    d1 = arr[arr[:, 2] == 1, 3]
+    d2 = arr[arr[:, 2] == 2, 3]
+    return dict(a=float(c0[0]), beta=float(c0[1]), gamma=float(c0[2]), se_beta=float(se[1]),
+                se_gamma=float(se[2]), t_gamma=float(c0[2] / se[2]) if se[2] > 0 else np.nan,
+                D1=float(d1.mean()) if len(d1) else np.nan, D2=float(d2.mean()) if len(d2) else np.nan,
+                n_pairs=len(arr), n_int=m)

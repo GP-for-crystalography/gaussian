@@ -1,0 +1,3 @@
+wyciac kawałek w śorkdu bo pływaja pixle dalej na krawedzaich domen 
+4 domeny  ale nie widać tej jednej na srodkowym pasie te małe pasy powinny byc inne -> nie widać
+wiec 3... 
